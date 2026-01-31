@@ -6,72 +6,96 @@ const PORT = process.env.PORT || 3000;
 const EVO  = process.env.EVO_URL;   // http://evo-xxx.sslip.io
 const KEY  = process.env.EVO_KEY;   // 9YpbUzDF6lLvd2TAZtmK24Ru8yQt0s41
 
-const html = (qr, state, inst) => `
+/* ---------- helpers ---------- */
+const fetchState = inst =>
+  fetch(`${EVO}/instance/connectionState/${inst}`,{headers:{apikey:KEY}}).then(r=>r.json());
+
+const fetchQR = inst =>
+  fetch(`${EVO}/instance/connect/${inst}`,{headers:{apikey:KEY}}).then(r=>r.json());
+
+const buildSrc = b64 =>
+  b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`;
+
+/* ---------- UI ---------- */
+const page = (qr, state, inst) => `
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>WhatsApp QR – ${inst}</title>
+  <title>WhatsApp Link – ${inst}</title>
   <style>
-    :root{--green:#25d366;--grey:#f2f2f2;--font:#333}
-    *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
-    body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--grey);color:var(--font)}
-    .card{background:#fff;border-radius:12px;box-shadow:0 8px 25px rgba(0,0,0,.15);padding:2rem 2.5rem;text-align:center;max-width:340px;width:90%}
-    h2{margin-bottom:.5rem;font-size:1.4rem}
-    p{margin-bottom:1.2rem;font-size:.95rem;line-height:1.4}
-    .status{display:inline-block;padding:.35rem .8rem;border-radius:20px;font-size:.8rem;font-weight:600;margin-bottom:1.2rem}
-    .status.ok{background:#e6f8ea;color:#128c3a}
-    .status.wait{background:#fff8e1;color:#b28600}
-    img{width:100%;max-width:260px;height:auto;border:1px solid #ddd;border-radius:8px;margin:0 auto 1.2rem}
-    .steps{text-align:left;font-size:.85rem;margin-bottom:1.2rem}
-    .steps li{margin:.4rem 0}
-    .refresh{font-size:.75rem;color:#888}
-    @media(max-width:360px){.card{padding:1.5rem 1.2rem}h2{font-size:1.2rem}}
+    :root{
+      --bg:#18191a;--card:#242526;--accent:#25d366;--text:#e4e6eb;--sub:#b0b3b8;
+      --danger:#f85149;--radius:16px;--shadow:0 12px 40px rgba(0,0,0,.4);
+    }
+    *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+    body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);color:var(--text);transition:background .3s}
+    .container{width:100%;max-width:380px;padding:24px}
+    .card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:32px 28px;text-align:center;position:relative;overflow:hidden}
+    .badge{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border-radius:999px;font-size:.8rem;font-weight:600;margin-bottom:20px}
+    .badge.ok{background:rgba(37,211,102,.15);color:var(--accent)}
+    .badge.warn{background:rgba(255,184,0,.15);color:#ffb800}
+    h2{font-size:1.5rem;margin-bottom:8px}
+    .sub{font-size:.95rem;color:var(--sub);margin-bottom:24px}
+    .qr-box{position:relative;margin:0 auto 24px;width:100%;max-width:280px;background:#fff;padding:16px;border-radius:12px;box-shadow:0 4px 20px rgba(0,0,0,.2)}
+    .qr-box img{width:100%;height:auto;display:block}
+    .steps{text-align:left;font-size:.9rem;color:var(--sub);list-style:none;margin-bottom:24px}
+    .steps li{margin:10px 0;display:flex;align-items:center;gap:10px}
+    .steps li::before{content:attr(data-icon);font-size:1.2rem}
+    .btn-primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;padding:12px 16px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:1rem;font-weight:600;cursor:pointer;transition:transform .2s,background .2s}
+    .btn-primary:hover{transform:translateY(-2px)}
+    .btn-secondary{margin-top:12px;background:transparent;color:var(--sub);border:1px solid var(--sub)}
+    .pulse{animation:pulse 2s infinite}
+    @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+    .hidden{display:none}
+    @media (max-width:400px){.card{padding:24px 20px}h2{font-size:1.3rem}}
   </style>
 </head>
 <body>
-  <div class="card">
-    ${state === 'open'
-      ? '<span class="status ok">✓ Already connected</span>'
-      : '<span class="status wait">Waiting for scan…</span>'
-    }
-    <h2>Link a device</h2>
-    <p>Open WhatsApp on your phone and scan the code below.</p>
-    ${state === 'open'
-      ? ''
-      : `<img src="${qr}" alt="QR code"/>
-         <ol class="steps">
-           <li>Tap <b>⋮</b> (Android) or <b>Settings</b> (iPhone)</li>
-           <li>Choose <b>Linked devices</b></li>
-           <li>Tap <b>Link a device</b> and point camera here</li>
-         </ol>
-         <div class="refresh">Page refreshes automatically every 5 seconds.</div>`
-    }
+  <div class="container">
+    <div class="card">
+      ${state==='open'
+        ? '<div class="badge ok"><svg width="16" height="16" fill="currentColor"><path d="M12.7 5.3a1 1 0 0 0-1.4-1.4l-4.3 4.3-1.8-1.8a1 1 0 0 0-1.4 1.4l2.5 2.5a1 1 0 0 0 1.4 0l5-5z"/></svg>Connected</div>'
+        : '<div class="badge warn pulse"><svg width="16" height="16" fill="currentColor"><path d="M12.4 3.9a1 1 0 0 0-1.8 0L6.5 10 4.2 6.3a1 1 0 0 0-1.8.8l3 5a1 1 0 0 0 .9.5h6a1 1 0 0 0 .9-.5l3-5a1 1 0 0 0-.8-1.8z"/></svg>Waiting for scan…</div>'
+      }
+      <h2>Link a Device</h2>
+      <p class="sub">Open WhatsApp on your phone and scan the code below.</p>
+      ${state==='open'
+        ? ''
+        : `<div class="qr-box pulse"><img src="${qr}" alt="QR code"/></div>
+           <ol class="steps">
+             <li data-icon="📱">Tap <b>⋮</b> (Android) or <b>Settings</b> (iPhone)</li>
+             <li data-icon="🔗">Choose <b>Linked devices</b></li>
+             <li data-icon="📷">Tap <b>Link a device</b> and point camera here</li>
+           </ol>
+           <button class="btn-primary" onclick="location.reload()">Refresh / Retry</button>`
+      }
+    </div>
   </div>
-  ${state !== 'open' ? '<meta http-equiv="refresh" content="5"/>' : ''}
+  ${state!=='open' ? '<meta http-equiv="refresh" content="5"/>' : ''}
 </body>
 </html>`;
 
+/* ---------- routes ---------- */
 app.get('/', async (req,res)=>{
   const inst = req.query.i || 'instance1';
   try{
-    const rs = await fetch(`${EVO}/instance/connectionState/${inst}`,{headers:{apikey:KEY}});
-    const j  = await rs.json();
-    if(j.state === 'open') return res.send(html(null,'open',inst));
+    const stateJ = await fetchState(inst);
+    if (stateJ.state === 'open') return res.send(page(null,'open',inst));
 
-    const qrRs = await fetch(`${EVO}/instance/connect/${inst}`,{headers:{apikey:KEY}});
-    const qrJ  = await qrRs.json();
+    const qrJ  = await fetchQR(inst);
     const b64  = qrJ.qrcode || qrJ.base64;
-    if(!b64) throw new Error('No QR returned');
-    const src  = b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`;
-    res.send(html(src,'connecting',inst));
+    if (!b64) throw new Error('No QR returned');
+    return res.send(page(buildSrc(b64),'connecting',inst));
   }catch(e){
     res.status(500).send(`
-      <div style="font-family:Arial;text-align:center;padding:3rem">
-        <h2>QR unavailable</h2>
-        <p>${e.message}</p>
-        <a href="?i=${encodeURIComponent(inst)}">Retry</a>
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;text-align:center;background:#18191a;color:#e4e6eb">
+        <div>
+          <h2 style="color:#f85149">QR unavailable</h2>
+          <p>${e.message}</p>
+          <button class="btn-primary" onclick="location.reload()" style="margin-top:1rem">Try again</button>
+        </div>
       </div>`);
   }
 });
