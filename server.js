@@ -3,12 +3,14 @@ import fetch from 'node-fetch';
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
-const EVO  = process.env.EVO_URL;   // http://evo-xxx.sslip.io
-const KEY  = process.env.EVO_KEY;   // 9YpbUzDF6lLvd2TAZtmK24Ru8yQt0s41
+const EVO  = process.env.EVO_URL;  
+const KEY  = process.env.EVO_KEY;  
 
 /* ---------- helpers ---------- */
 const fetchState = inst =>
-  fetch(`${EVO}/instance/connectionState/${inst}`,{headers:{apikey:KEY}}).then(r=>r.json());
+  fetch(`${EVO}/instance/connectionState/${inst}`,{headers:{apikey:KEY}})
+    .then(r=>r.json())
+    .then(j=> j.instance || j);   
 
 const fetchQR = inst =>
   fetch(`${EVO}/instance/connect/${inst}`,{headers:{apikey:KEY}}).then(r=>r.json());
@@ -79,7 +81,7 @@ const page = (qr, state, inst) => `
 
 /* ---------- routes ---------- */
 app.get('/', async (req,res)=>{
-  const inst = req.query.i || 'instance1';
+  const inst = req.query.i;
   try{
     const stateJ = await fetchState(inst);
     if (stateJ.state === 'open') return res.send(page(null,'open',inst));
