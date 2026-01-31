@@ -3,14 +3,15 @@ import fetch from 'node-fetch';
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
-const EVO  = process.env.EVO_URL;  
-const KEY  = process.env.EVO_KEY;  
+const EVO  = process.env.EVO_URL;
+const KEY  = process.env.EVO_KEY;
+const HOOK = process.env.WEBHOOK_URL;
 
 /* ---------- helpers ---------- */
 const fetchState = inst =>
   fetch(`${EVO}/instance/connectionState/${inst}`,{headers:{apikey:KEY}})
     .then(r=>r.json())
-    .then(j=> j.instance || j);   
+    .then(j=> j.instance || j);
 
 const fetchQR = inst =>
   fetch(`${EVO}/instance/connect/${inst}`,{headers:{apikey:KEY}}).then(r=>r.json());
@@ -18,8 +19,15 @@ const fetchQR = inst =>
 const buildSrc = b64 =>
   b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`;
 
+const notifyConnected = async (inst, phone) => {
+  if (!HOOK) return;
+  const body = { instance: inst, phone: phone || null, status: 'connected', ts: new Date().toISOString() };
+  try{ await fetch(HOOK, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(body)}); }
+  catch(e){ console.log('Webhook failed', e.message); }
+};
+
 /* ---------- UI ---------- */
-const page = (qr, state, inst) => `
+const page = (qr, state, inst, phone) => `
 <!doctype html>
 <html lang="en">
 <head>
@@ -27,10 +35,7 @@ const page = (qr, state, inst) => `
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>WhatsApp Link – ${inst}</title>
   <style>
-    :root{
-      --bg:#18191a;--card:#242526;--accent:#25d366;--text:#e4e6eb;--sub:#b0b3b8;
-      --danger:#f85149;--radius:16px;--shadow:0 12px 40px rgba(0,0,0,.4);
-    }
+    :root{--bg:#18191a;--card:#242526;--accent:#25d366;--text:#e4e6eb;--sub:#b0b3b8;--danger:#f85149;--radius:16px;--shadow:0 12px 40px rgba(0,0,0,.4)}
     *{box-sizing:border-box;margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
     body{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--bg);color:var(--text);transition:background .3s}
     .container{width:100%;max-width:380px;padding:24px}
@@ -76,20 +81,31 @@ const page = (qr, state, inst) => `
     </div>
   </div>
   ${state!=='open' ? '<meta http-equiv="refresh" content="5"/>' : ''}
+  <!-- if we just landed on "open", fire webhook once -->
+  ${state==='open' && phone ? `<script>
+    fetch('${HOOK}',{method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({instance:'${inst}',phone:'${phone}',status:'connected',ts:new Date().toISOString()})});
+  </script>` : ''}
 </body>
 </html>`;
 
 /* ---------- routes ---------- */
 app.get('/', async (req,res)=>{
-  const inst = req.query.i;
+  const inst  = req.query.i || '';
+  const phone = req.query.num || '';
+
   try{
     const stateJ = await fetchState(inst);
-    if (stateJ.state === 'open') return res.send(page(null,'open',inst));
+    if (stateJ.state === 'open'){
+      // notify only once per landing
+      await notifyConnected(inst, phone);
+      return res.send(page(null,'open',inst,phone));
+    }
 
-    const qrJ  = await fetchQR(inst);
-    const b64  = qrJ.qrcode || qrJ.base64;
+    const qrJ = await fetchQR(inst);
+    const b64 = qrJ.qrcode || qrJ.base64;
     if (!b64) throw new Error('No QR returned');
-    return res.send(page(buildSrc(b64),'connecting',inst));
+    res.send(page(buildSrc(b64),'connecting',inst,phone));
   }catch(e){
     res.status(500).send(`
       <div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;text-align:center;background:#18191a;color:#e4e6eb">
