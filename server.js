@@ -7,7 +7,7 @@ const EVO  = process.env.EVO_URL;
 const KEY  = process.env.EVO_KEY;  
 
 app.get('/', async (req,res)=>{
-  const inst = req.query.i || 'instance1';
+  const inst = req.query.i;
   try{
     const rs = await fetch(`${EVO}/instance/connect/${inst}`,{
       headers:{ apikey: KEY }
